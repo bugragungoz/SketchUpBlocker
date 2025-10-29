@@ -515,13 +515,16 @@ function Invoke-UnblockMode {
     Write-Host "[Step 2] Restoring hosts file..." -ForegroundColor Cyan
     
     $hostsPath = "$env:SystemRoot\System32\drivers\etc\hosts"
-    $hostsBackup = "$hostsPath.backup"
+    $hostsBackupPattern = "hosts.backup_*"
+    $hostsBackupFiles = Get-ChildItem -Path (Split-Path $hostsPath) -Filter $hostsBackupPattern -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
     
     try {
-        if (Test-Path $hostsBackup) {
-            Copy-Item -Path $hostsBackup -Destination $hostsPath -Force
+        if ($hostsBackupFiles) {
+            $latestHostsBackup = $hostsBackupFiles[0]
+            Write-Host "  [OK] Found hosts backup: $($latestHostsBackup.Name)" -ForegroundColor Green
+            Copy-Item -Path $latestHostsBackup.FullName -Destination $hostsPath -Force
             Write-Host "  [OK] Hosts file restored from backup" -ForegroundColor Green
-            Write-Log "Hosts file restored from backup" -Level SUCCESS
+            Write-Log "Hosts file restored from $($latestHostsBackup.Name)" -Level SUCCESS
         }
         else {
             Write-Host "  [WARNING] No hosts file backup found" -ForegroundColor Yellow
@@ -561,34 +564,136 @@ function Invoke-RollbackMode {
     $backupFiles = Get-ChildItem -Path $script:Config.BackupDirectory -Filter "FirewallRules_*.xml" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
     
     if (-not $backupFiles) {
-        Write-Host "  [ERROR] No backup files found in: $($script:Config.BackupDirectory)" -ForegroundColor Red
+        Write-Host "  [ERROR] No firewall backup files found in: $($script:Config.BackupDirectory)" -ForegroundColor Red
         Write-Host "  [INFO] Use UNBLOCK MODE instead to remove rules" -ForegroundColor Cyan
         Write-Log "Rollback failed: No backup files found" -Level ERROR
         return
     }
     
     $latestBackup = $backupFiles[0]
-    Write-Host "  [OK] Found backup: $($latestBackup.Name)" -ForegroundColor Green
+    Write-Host "  [OK] Found firewall backup: $($latestBackup.Name)" -ForegroundColor Green
     Write-Host "  [INFO] Created: $($latestBackup.LastWriteTime)" -ForegroundColor Cyan
     
     Write-Host ""
-    Write-Host "[Step 2] Restoring firewall rules..." -ForegroundColor Cyan
+    Write-Host "[Step 2] Removing current firewall rules..." -ForegroundColor Cyan
+    
+    try {
+        $currentRules = Get-NetFirewallRule | Where-Object { $_.DisplayName -like "$($script:Config.RulePrefix)*" }
+        
+        if ($currentRules) {
+            Write-Host "  [INFO] Removing $($currentRules.Count) current rules..." -ForegroundColor Yellow
+            foreach ($rule in $currentRules) {
+                Remove-NetFirewallRule -Name $rule.Name -ErrorAction SilentlyContinue
+            }
+            Write-Host "  [OK] Current rules removed" -ForegroundColor Green
+            Write-Log "Removed $($currentRules.Count) current rules before restore" -Level SUCCESS
+        }
+        else {
+            Write-Host "  [INFO] No current rules to remove" -ForegroundColor Cyan
+        }
+    }
+    catch {
+        Write-Host "  [ERROR] Failed to remove current rules: $_" -ForegroundColor Red
+        Write-Log "Current rule removal failed: $_" -Level ERROR
+    }
+    
+    Write-Host ""
+    Write-Host "[Step 3] Restoring firewall rules from backup..." -ForegroundColor Cyan
     
     try {
         $backupData = Get-Content -Path $latestBackup.FullName -Raw | ConvertFrom-Json
         
         if ($backupData) {
-            Write-Host "  [OK] Backup contains $($backupData.Count) rules" -ForegroundColor Green
-            Write-Host "  [INFO] Rollback is not fully implemented in this version" -ForegroundColor Yellow
-            Write-Host "  [INFO] Use UNBLOCK MODE to remove current rules" -ForegroundColor Cyan
-            Write-Log "Rollback requested but not fully implemented" -Level WARNING
+            if ($backupData -is [System.Array]) {
+                $rulesToRestore = $backupData
+            }
+            else {
+                $rulesToRestore = @($backupData)
+            }
+            
+            Write-Host "  [INFO] Backup contains $($rulesToRestore.Count) rules" -ForegroundColor Cyan
+            
+            $restoredCount = 0
+            $failedCount = 0
+            
+            foreach ($rule in $rulesToRestore) {
+                try {
+                    # Extract rule properties
+                    $params = @{
+                        DisplayName = $rule.DisplayName
+                        Direction   = $rule.Direction
+                        Action      = $rule.Action
+                        Enabled     = $rule.Enabled
+                    }
+                    
+                    # Get program path from filter
+                    $filter = Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $rule -ErrorAction SilentlyContinue
+                    if ($filter -and $filter.Program) {
+                        $params['Program'] = $filter.Program
+                    }
+                    
+                    # Create the rule
+                    New-NetFirewallRule @params -ErrorAction Stop | Out-Null
+                    $restoredCount++
+                    
+                    if ($restoredCount % 10 -eq 0) {
+                        Write-Host "    [INFO] Restored $restoredCount rules..." -ForegroundColor Gray
+                    }
+                }
+                catch {
+                    $failedCount++
+                    Write-Log "Failed to restore rule $($rule.DisplayName): $_" -Level WARNING
+                }
+            }
+            
+            Write-Host "  [OK] Successfully restored $restoredCount rules" -ForegroundColor Green
+            if ($failedCount -gt 0) {
+                Write-Host "  [WARNING] Failed to restore $failedCount rules" -ForegroundColor Yellow
+            }
+            Write-Log "Firewall rollback completed: $restoredCount restored, $failedCount failed" -Level SUCCESS
+        }
+        else {
+            Write-Host "  [ERROR] Backup file is empty or invalid" -ForegroundColor Red
+            Write-Log "Invalid backup file" -Level ERROR
         }
     }
     catch {
-        Write-Host "  [ERROR] Failed to read backup: $_" -ForegroundColor Red
-        Write-Log "Backup read failed: $_" -Level ERROR
+        Write-Host "  [ERROR] Failed to restore from backup: $_" -ForegroundColor Red
+        Write-Log "Backup restore failed: $_" -Level ERROR
     }
     
+    Write-Host ""
+    Write-Host "[Step 4] Restoring hosts file..." -ForegroundColor Cyan
+    
+    $hostsPath = "$env:SystemRoot\System32\drivers\etc\hosts"
+    $hostsBackupPattern = "hosts.backup_*"
+    $hostsBackupFiles = Get-ChildItem -Path (Split-Path $hostsPath) -Filter $hostsBackupPattern -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
+    
+    try {
+        if ($hostsBackupFiles) {
+            $latestHostsBackup = $hostsBackupFiles[0]
+            Write-Host "  [OK] Found hosts backup: $($latestHostsBackup.Name)" -ForegroundColor Green
+            Copy-Item -Path $latestHostsBackup.FullName -Destination $hostsPath -Force
+            Write-Host "  [OK] Hosts file restored from backup" -ForegroundColor Green
+            Write-Log "Hosts file restored from $($latestHostsBackup.Name)" -Level SUCCESS
+        }
+        else {
+            Write-Host "  [WARNING] No hosts file backup found" -ForegroundColor Yellow
+            Write-Host "  [INFO] Manually check: $hostsPath" -ForegroundColor Cyan
+            Write-Log "No hosts backup found for rollback" -Level WARNING
+        }
+    }
+    catch {
+        Write-Host "  [ERROR] Failed to restore hosts file: $_" -ForegroundColor Red
+        Write-Log "Hosts restore failed: $_" -Level ERROR
+    }
+    
+    Write-Host ""
+    Write-Host "================================================================================" -ForegroundColor Green
+    Write-Host "                          ROLLBACK COMPLETE                                     " -ForegroundColor Green
+    Write-Host "================================================================================" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  System has been restored to previous state." -ForegroundColor Green
     Write-Host ""
 }
 
@@ -781,7 +886,7 @@ function Block-SketchUpDomains {
     Write-Host "[Step 5] Blocking ALL SketchUp and Trimble domains (FULL BLOCK)..." -ForegroundColor Cyan
     
     $hostsPath = "$env:SystemRoot\System32\drivers\etc\hosts"
-    $hostsBackup = "$hostsPath.backup"
+    $hostsBackup = "$hostsPath.backup_$($script:Config.SessionID)"
     
     # FULL BLOCK MODE: Block ALL SketchUp and Trimble domains
     $domainsToBlock = @(
@@ -928,12 +1033,90 @@ function Check-SketchUpServices {
         
         if ($services) {
             Write-Host "  [INFO] Found $($services.Count) SketchUp-related services:" -ForegroundColor Yellow
+            
+            $runningServices = @()
             foreach ($service in $services) {
                 $statusColor = if ($service.Status -eq "Running") { "Red" } else { "Green" }
                 Write-Host "    - $($service.DisplayName) [$($service.Status)]" -ForegroundColor $statusColor
                 Write-Log "Found service: $($service.DisplayName) - Status: $($service.Status)" -Level INFO
+                
+                if ($service.Status -eq "Running") {
+                    $runningServices += $service
+                }
             }
             $script:Statistics.ServicesFound = $services.Count
+            
+            # Ask user if they want to stop/disable running services
+            if ($runningServices.Count -gt 0 -and -not $script:Config.DryRun) {
+                Write-Host ""
+                Write-Host "  [INFO] Found $($runningServices.Count) RUNNING services" -ForegroundColor Yellow
+                Write-Host "  Would you like to manage these services?" -ForegroundColor Cyan
+                Write-Host ""
+                Write-Host "  [1] Stop services (temporary - will restart on reboot)" -ForegroundColor White
+                Write-Host "  [2] Stop AND Disable services (permanent - won't restart)" -ForegroundColor White
+                Write-Host "  [3] Skip (leave services running)" -ForegroundColor White
+                Write-Host ""
+                
+                $choice = Read-Host "  Select option [1-3]"
+                
+                switch ($choice) {
+                    "1" {
+                        Write-Host ""
+                        Write-Host "  [INFO] Stopping services..." -ForegroundColor Cyan
+                        foreach ($service in $runningServices) {
+                            try {
+                                Stop-Service -Name $service.Name -Force -ErrorAction Stop
+                                Write-Host "    [OK] Stopped: $($service.DisplayName)" -ForegroundColor Green
+                                Write-Log "Stopped service: $($service.DisplayName)" -Level SUCCESS
+                            }
+                            catch {
+                                Write-Host "    [ERROR] Failed to stop: $($service.DisplayName)" -ForegroundColor Red
+                                Write-Log "Failed to stop service $($service.DisplayName): $_" -Level ERROR
+                            }
+                        }
+                        Write-Host "  [OK] Service stop operation completed" -ForegroundColor Green
+                    }
+                    "2" {
+                        Write-Host ""
+                        Write-Host "  [WARNING] This will STOP and DISABLE services permanently!" -ForegroundColor Yellow
+                        Write-Host "  Type 'CONFIRM' to proceed: " -ForegroundColor Yellow -NoNewline
+                        $confirm = Read-Host
+                        
+                        if ($confirm -eq "CONFIRM") {
+                            Write-Host ""
+                            Write-Host "  [INFO] Stopping and disabling services..." -ForegroundColor Cyan
+                            foreach ($service in $runningServices) {
+                                try {
+                                    Stop-Service -Name $service.Name -Force -ErrorAction Stop
+                                    Set-Service -Name $service.Name -StartupType Disabled -ErrorAction Stop
+                                    Write-Host "    [OK] Stopped and Disabled: $($service.DisplayName)" -ForegroundColor Green
+                                    Write-Log "Stopped and disabled service: $($service.DisplayName)" -Level SUCCESS
+                                }
+                                catch {
+                                    Write-Host "    [ERROR] Failed: $($service.DisplayName)" -ForegroundColor Red
+                                    Write-Log "Failed to stop/disable service $($service.DisplayName): $_" -Level ERROR
+                                }
+                            }
+                            Write-Host "  [OK] Services stopped and disabled" -ForegroundColor Green
+                        }
+                        else {
+                            Write-Host "  [INFO] Operation cancelled" -ForegroundColor Cyan
+                            Write-Log "User cancelled service disable operation" -Level INFO
+                        }
+                    }
+                    "3" {
+                        Write-Host "  [INFO] Skipping service management" -ForegroundColor Cyan
+                        Write-Log "User skipped service management" -Level INFO
+                    }
+                    default {
+                        Write-Host "  [INFO] Invalid choice - skipping service management" -ForegroundColor Yellow
+                    }
+                }
+            }
+            elseif ($script:Config.DryRun -and $runningServices.Count -gt 0) {
+                Write-Host ""
+                Write-Host "  [DRY RUN] Would prompt to stop/disable $($runningServices.Count) running services" -ForegroundColor DarkGray
+            }
         }
         else {
             Write-Host "  [INFO] No SketchUp services detected" -ForegroundColor Cyan
