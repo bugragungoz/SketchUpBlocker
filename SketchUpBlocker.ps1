@@ -5,8 +5,8 @@
     SketchUp 2025 Internet Access Blocker - Selective Network Blocking Tool
     
 .DESCRIPTION
-    Advanced PowerShell script to block internet access for SketchUp 2025 while
-    preserving Extension Warehouse, 3D Warehouse, and essential functionality.
+    Advanced PowerShell script to completely block ALL internet access for SketchUp 2025.
+    Full network blocking with no exceptions.
     
 .NOTES
     Name:           SketchUp 2025 Internet Access Blocker
@@ -30,19 +30,14 @@
     BY USING THIS SCRIPT, YOU ACKNOWLEDGE AND ACCEPT FULL RESPONSIBILITY FOR YOUR ACTIONS.
     
 .IMPORTANT
-    This script PRESERVES the following features:
-    - Extension Warehouse (plugin downloads)
-    - 3D Warehouse (model downloads)
-    - Trimble Connect basic functionality
-    - Online content access
-    - Import/Export functionality
-    
-    BLOCKS:
-    - License validation servers
-    - Activation servers
+    This script implements FULL NETWORK BLOCKING for SketchUp 2025:
+    - ALL executables and DLLs blocked from internet access
+    - License validation and activation servers
     - Telemetry and analytics
     - Automatic updates
-    - Usage tracking
+    - Extension Warehouse and 3D Warehouse
+    - Trimble Connect and all online features
+    - ALL SketchUp domains blocked
 #>
 
 $ErrorActionPreference = "Stop"
@@ -60,7 +55,7 @@ $script:Config = @{
 
 $script:Statistics = @{
     TotalFilesScanned       = 0
-    FilesAllowed            = 0
+    FilesBlocked            = 0
     FirewallRulesCreated    = 0
     DomainsBlocked          = 0
     IPRulesCreated          = 0
@@ -68,43 +63,21 @@ $script:Statistics = @{
     ExecutionStartTime      = Get-Date
     ExecutionEndTime        = $null
     BlockedFilesList        = @()
-    AllowedFilesList        = @()
 }
 
 $script:BlockedFilesHashSet = @{}
-
-# CRITICAL: Files/components that MUST remain unblocked for Extension Warehouse & 3D Warehouse
-$script:AllowedComponents = @(
-    # Extension Warehouse & 3D Warehouse
-    "ExtensionWarehouse", "3DWarehouse", "Warehouse", "Extension", "Plugin",
-    "Store", "Content", "Download", "Asset", "Model", "Component",
-    
-    # Trimble Connect (basic functionality)
-    "TrimbleConnect", "Connect", "Sync", "Cloud", "Collaboration",
-    
-    # Import/Export & Online Services
-    "Import", "Export", "Converter", "Translator", "Web", "Online",
-    "WebDialog", "Browser", "HTTP", "API", "REST",
-    
-    # Main executables (MUST work)
-    "SketchUp.exe", "SketchUp 2025.exe", "LayOut.exe", "Style Builder.exe",
-    
-    # Ruby/Plugin System
-    "Ruby", "RubyConsole", "PluginManager", "Sketchucation",
-    
-    # Rendering & Online Features
-    "Render", "VRay", "Enscape", "Twinmotion"
-)
 
 function Show-Banner {
     Write-Host ""
     Write-Host "================================================================================" -ForegroundColor Cyan
     Write-Host "                                                                                " -ForegroundColor Cyan
-    Write-Host "    ███████ ██   ██ ███████ ████████  ██████ ██   ██ ██    ██ ████████" -ForegroundColor Cyan
-    Write-Host "    ██      ██  ██  ██         ██    ██      ██   ██ ██    ██ ██     " -ForegroundColor Cyan
-    Write-Host "    ███████ █████   █████      ██    ██      ███████ ██    ██ ████████" -ForegroundColor Cyan
-    Write-Host "         ██ ██  ██  ██         ██    ██      ██   ██ ██    ██ ██     " -ForegroundColor Cyan
-    Write-Host "    ███████ ██   ██ ███████    ██     ██████ ██   ██  ██████  ████████" -ForegroundColor Cyan
+    Write-Host "     ######  ########   #######  ##     ## ########" -ForegroundColor Cyan
+    Write-Host "    ##    ## ##     ## ##     ##  ##   ##       ## " -ForegroundColor Cyan
+    Write-Host "    ##       ##     ## ##     ##   ## ##       ##  " -ForegroundColor Cyan
+    Write-Host "    ##       ########  ##     ##    ###       ##   " -ForegroundColor Cyan
+    Write-Host "    ##       ##   ##   ##     ##   ## ##     ##    " -ForegroundColor Cyan
+    Write-Host "    ##    ## ##    ##  ##     ##  ##   ##   ##     " -ForegroundColor Cyan
+    Write-Host "     ######  ##     ##  #######  ##     ## ########" -ForegroundColor Cyan
     Write-Host "                                                                                " -ForegroundColor Cyan
     Write-Host "            SketchUp 2025 Internet Access Blocker v1.0.0                       " -ForegroundColor Cyan
     Write-Host "                                                                                " -ForegroundColor Cyan
@@ -114,7 +87,7 @@ function Show-Banner {
     Write-Host "  Session ID: $($script:Config.SessionID)" -ForegroundColor Gray
     Write-Host "  Firewall Rule Prefix: $($script:Config.RulePrefix)" -ForegroundColor Gray
     Write-Host ""
-    Write-Host "  [!] SPECIAL MODE: Extension Warehouse & 3D Warehouse PRESERVED" -ForegroundColor Green
+    Write-Host "  [!] FULL BLOCK MODE: ALL network access blocked" -ForegroundColor Red
     Write-Host "  [!] Press Ctrl+C at any time to abort operation" -ForegroundColor Yellow
     Write-Host ""
 }
@@ -246,7 +219,7 @@ function Show-MainMenu {
     Write-Host "                              OPERATION MODE                                    " -ForegroundColor Cyan
     Write-Host "================================================================================" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  [1] BLOCK MODE      - Selective blocking (preserves Extension Warehouse)" -ForegroundColor Green
+    Write-Host "  [1] BLOCK MODE      - FULL network blocking (blocks ALL internet access)" -ForegroundColor Green
     Write-Host "  [2] DRY RUN MODE    - Analyze and report without making changes" -ForegroundColor Yellow
     Write-Host "  [3] UNBLOCK MODE    - Remove all blocking rules" -ForegroundColor Red
     Write-Host "  [4] ROLLBACK MODE   - Restore from backup" -ForegroundColor Magenta
@@ -266,23 +239,20 @@ function Show-BlockModeDisclaimer {
     Write-Host "                       BLOCK MODE - LEGAL DISCLAIMER                            " -ForegroundColor Yellow
     Write-Host "================================================================================" -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "  This mode will make SELECTIVE changes to your system:" -ForegroundColor White
+    Write-Host "  This mode will make FULL BLOCKING changes to your system:" -ForegroundColor White
     Write-Host ""
-    Write-Host "  1. CREATE SELECTIVE FIREWALL RULES:" -ForegroundColor Cyan
-    Write-Host "     - Block telemetry, updates, and license validation" -ForegroundColor White
-    Write-Host "     - PRESERVE Extension Warehouse functionality" -ForegroundColor Green
-    Write-Host "     - PRESERVE 3D Warehouse access" -ForegroundColor Green
-    Write-Host "     - PRESERVE Trimble Connect basic features" -ForegroundColor Green
+    Write-Host "  1. CREATE FIREWALL RULES FOR ALL FILES:" -ForegroundColor Cyan
+    Write-Host "     - Block ALL SketchUp executables and DLLs" -ForegroundColor Red
+    Write-Host "     - No exceptions - complete network isolation" -ForegroundColor Red
     Write-Host "     - Rules will be prefixed with: $($script:Config.RulePrefix)" -ForegroundColor White
     Write-Host ""
-    Write-Host "  2. MODIFY HOSTS FILE (SELECTIVE):" -ForegroundColor Cyan
-    Write-Host "     - Block only telemetry and license domains" -ForegroundColor White
-    Write-Host "     - PRESERVE extension and model downloads" -ForegroundColor Green
-    Write-Host "     - PRESERVE online content access" -ForegroundColor Green
+    Write-Host "  2. MODIFY HOSTS FILE (FULL BLOCKING):" -ForegroundColor Cyan
+    Write-Host "     - Block ALL SketchUp and Trimble domains" -ForegroundColor Red
+    Write-Host "     - License, telemetry, updates, warehouses, everything" -ForegroundColor Red
     Write-Host ""
-    Write-Host "  3. BLOCK IP RANGES (SELECTIVE):" -ForegroundColor Cyan
-    Write-Host "     - Only block known license/telemetry servers" -ForegroundColor White
-    Write-Host "     - Extension Warehouse remains accessible" -ForegroundColor Green
+    Write-Host "  3. COMPLETE NETWORK ISOLATION:" -ForegroundColor Cyan
+    Write-Host "     - SketchUp will have ZERO internet connectivity" -ForegroundColor Red
+    Write-Host "     - All online features disabled" -ForegroundColor Red
     Write-Host ""
     Write-Host "  LEGAL NOTICE:" -ForegroundColor Red
     Write-Host "  - You are SOLELY RESPONSIBLE for compliance with software licenses" -ForegroundColor Yellow
@@ -382,41 +352,39 @@ function Show-DisclaimerAndHelp {
     Write-Host ""
     Write-Host "================================================================================" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "SPECIAL FEATURES - SELECTIVE BLOCKING:" -ForegroundColor Green
+    Write-Host "FULL BLOCK MODE - COMPLETE NETWORK ISOLATION:" -ForegroundColor Red
     Write-Host "-------------------------------------------------------------------------------" -ForegroundColor Gray
     Write-Host ""
-    Write-Host "  PRESERVED (Will Continue Working):" -ForegroundColor Green
-    Write-Host "  - Extension Warehouse (plugin downloads)" -ForegroundColor White
-    Write-Host "  - 3D Warehouse (model downloads)" -ForegroundColor White
-    Write-Host "  - Trimble Connect basic functionality" -ForegroundColor White
-    Write-Host "  - Online content access" -ForegroundColor White
-    Write-Host "  - Import/Export functionality" -ForegroundColor White
-    Write-Host "  - Ruby plugin system" -ForegroundColor White
-    Write-Host "  - Rendering extensions (V-Ray, Enscape, etc.)" -ForegroundColor White
-    Write-Host ""
-    Write-Host "  BLOCKED:" -ForegroundColor Red
+    Write-Host "  EVERYTHING BLOCKED (No Exceptions):" -ForegroundColor Red
+    Write-Host "  - ALL executables and DLLs blocked from internet" -ForegroundColor White
     Write-Host "  - License validation and activation servers" -ForegroundColor White
     Write-Host "  - Telemetry and analytics" -ForegroundColor White
     Write-Host "  - Automatic software updates" -ForegroundColor White
-    Write-Host "  - Usage tracking" -ForegroundColor White
-    Write-Host "  - Marketing communications" -ForegroundColor White
+    Write-Host "  - Extension Warehouse and 3D Warehouse" -ForegroundColor White
+    Write-Host "  - Trimble Connect and cloud features" -ForegroundColor White
+    Write-Host "  - ALL online content and services" -ForegroundColor White
+    Write-Host "  - ALL SketchUp and Trimble domains (60+ domains)" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  RESULT:" -ForegroundColor Yellow
+    Write-Host "  - SketchUp will have ZERO internet connectivity" -ForegroundColor White
+    Write-Host "  - Completely offline operation only" -ForegroundColor White
     Write-Host ""
     Write-Host "================================================================================" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "TROUBLESHOOTING:" -ForegroundColor Green
     Write-Host "-------------------------------------------------------------------------------" -ForegroundColor Gray
     Write-Host ""
-    Write-Host "  Problem: Extension Warehouse not working" -ForegroundColor Yellow
+    Write-Host "  Problem: Need to temporarily enable internet" -ForegroundColor Yellow
     Write-Host "  Solution:" -ForegroundColor Cyan
-    Write-Host "    - This script should preserve Extension Warehouse" -ForegroundColor White
-    Write-Host "    - If not working, run UNBLOCK MODE and report the issue" -ForegroundColor White
-    Write-Host "    - Check Windows Firewall for accidental blocks" -ForegroundColor White
+    Write-Host "    - Run script and select UNBLOCK MODE (option 3)" -ForegroundColor White
+    Write-Host "    - This removes all firewall rules and restores hosts file" -ForegroundColor White
+    Write-Host "    - Re-run BLOCK MODE when finished" -ForegroundColor White
     Write-Host ""
-    Write-Host "  Problem: 3D Warehouse models not downloading" -ForegroundColor Yellow
+    Write-Host "  Problem: SketchUp still connecting to internet" -ForegroundColor Yellow
     Write-Host "  Solution:" -ForegroundColor Cyan
-    Write-Host "    - 3D Warehouse functionality should be preserved" -ForegroundColor White
-    Write-Host "    - Verify internet connection is working" -ForegroundColor White
-    Write-Host "    - Try UNBLOCK MODE temporarily" -ForegroundColor White
+    Write-Host "    - Verify Windows Firewall service is running" -ForegroundColor White
+    Write-Host "    - Check hosts file was modified correctly" -ForegroundColor White
+    Write-Host "    - Run BLOCK MODE again (option 1)" -ForegroundColor White
     Write-Host ""
     Write-Host "================================================================================" -ForegroundColor Cyan
     Write-Host ""
@@ -627,17 +595,9 @@ function Invoke-RollbackMode {
 function Test-ShouldBlockFile {
     param([System.IO.FileInfo]$File)
     
-    # Check if file should be ALLOWED (not blocked)
-    foreach ($allowed in $script:AllowedComponents) {
-        if ($File.Name -like "*$allowed*") {
-            Write-Log "File ALLOWED (Extension Warehouse preserved): $($File.Name)" -Level DEBUG
-            return $false # Do NOT block
-        }
-    }
-    
-    # If not in allowed list, BLOCK it
+    # FULL BLOCK MODE: Block ALL files
     Write-Log "File BLOCKED: $($File.Name)" -Level DEBUG
-    return $true # Block
+    return $true # Block everything
 }
 
 function Create-FirewallRule {
@@ -705,71 +665,55 @@ function Process-SketchUpDirectory {
         return 0
     }
     
-    Write-Host "  [INFO] Found $($files.Count) files to analyze" -ForegroundColor Cyan
+    Write-Host "  [INFO] Found $($files.Count) files to block" -ForegroundColor Cyan
     
     $blockedCount = 0
-    $allowedCount = 0
     $fileArray = @($files)
     
     for ($i = 0; $i -lt $fileArray.Count; $i++) {
         $file = $fileArray[$i]
         $percentage = [math]::Round((($i + 1) / $fileArray.Count) * 100)
         
-        Write-Progress -Activity "Analyzing SketchUp Files" -Status "$percentage% Complete" -PercentComplete $percentage -CurrentOperation $file.Name
+        Write-Progress -Activity "Blocking SketchUp Files" -Status "$percentage% Complete" -PercentComplete $percentage -CurrentOperation $file.Name
         
         $script:Statistics.TotalFilesScanned++
         
-        $shouldBlock = Test-ShouldBlockFile -File $file
-        
-        if ($shouldBlock) {
-            # BLOCK this file
-            if (-not $script:BlockedFilesHashSet.ContainsKey($file.FullName)) {
-                $script:BlockedFilesHashSet[$file.FullName] = $true
+        # FULL BLOCK MODE: Block ALL files
+        if (-not $script:BlockedFilesHashSet.ContainsKey($file.FullName)) {
+            $script:BlockedFilesHashSet[$file.FullName] = $true
+            
+            $displayName = "$($file.BaseName) - $($file.Extension)"
+            
+            if (Create-FirewallRule -DisplayName $displayName -FilePath $file.FullName -Direction Outbound) {
+                Create-FirewallRule -DisplayName $displayName -FilePath $file.FullName -Direction Inbound | Out-Null
+                $blockedCount++
                 
-                $displayName = "$($file.BaseName) - $($file.Extension)"
-                
-                if (Create-FirewallRule -DisplayName $displayName -FilePath $file.FullName -Direction Outbound) {
-                    Create-FirewallRule -DisplayName $displayName -FilePath $file.FullName -Direction Inbound | Out-Null
-                    $blockedCount++
-                    
-                    if ($script:Config.DryRun) {
-                        Write-Host "    [DRY RUN] Would BLOCK: $($file.Name)" -ForegroundColor DarkGray
-                    }
-                    else {
-                        Write-Host "    [BLOCKED] $($file.Name)" -ForegroundColor Red
-                    }
-                    
-                    $script:Statistics.BlockedFilesList += $file.FullName
+                if ($script:Config.DryRun) {
+                    Write-Host "    [DRY RUN] Would BLOCK: $($file.Name)" -ForegroundColor DarkGray
                 }
+                else {
+                    Write-Host "    [BLOCKED] $($file.Name)" -ForegroundColor Red
+                }
+                
+                $script:Statistics.BlockedFilesList += $file.FullName
+                $script:Statistics.FilesBlocked++
             }
-        }
-        else {
-            # ALLOW this file (Extension Warehouse preserved)
-            $allowedCount++
-            if ($script:Config.DryRun) {
-                Write-Host "    [DRY RUN] Would ALLOW: $($file.Name)" -ForegroundColor DarkCyan
-            }
-            else {
-                Write-Host "    [ALLOWED] $($file.Name)" -ForegroundColor Green
-            }
-            $script:Statistics.AllowedFilesList += $file.FullName
-            $script:Statistics.FilesAllowed++
         }
     }
     
-    Write-Progress -Activity "Analyzing SketchUp Files" -Completed
+    Write-Progress -Activity "Blocking SketchUp Files" -Completed
     
     Write-Host ""
-    Write-Host "  [OK] Blocked: $blockedCount files | Allowed: $allowedCount files" -ForegroundColor Cyan
-    Write-Log "Processed $($files.Count) files from $Path (Blocked: $blockedCount, Allowed: $allowedCount)" -Level SUCCESS
+    Write-Host "  [OK] Blocked: $blockedCount files" -ForegroundColor Red
+    Write-Log "Processed $($files.Count) files from $Path (ALL Blocked: $blockedCount)" -Level SUCCESS
     
     return $blockedCount
 }
 
 function Process-SystemLocations {
     Write-Host ""
-    Write-Host "[Step 4] Scanning system locations with SELECTIVE blocking..." -ForegroundColor Cyan
-    Write-Host "  [INFO] Extension Warehouse & 3D Warehouse functionality will be PRESERVED" -ForegroundColor Green
+    Write-Host "[Step 4] Scanning system locations with FULL blocking..." -ForegroundColor Cyan
+    Write-Host "  [INFO] ALL SketchUp files will be BLOCKED from internet access" -ForegroundColor Red
     
     # Find all SketchUp installations
     $baseSketchUpPaths = @(
@@ -834,40 +778,90 @@ function Process-SystemLocations {
 
 function Block-SketchUpDomains {
     Write-Host ""
-    Write-Host "[Step 5] Blocking SketchUp domains (SELECTIVE - Extension Warehouse preserved)..." -ForegroundColor Cyan
+    Write-Host "[Step 5] Blocking ALL SketchUp and Trimble domains (FULL BLOCK)..." -ForegroundColor Cyan
     
     $hostsPath = "$env:SystemRoot\System32\drivers\etc\hosts"
     $hostsBackup = "$hostsPath.backup"
     
-    # ONLY block license, activation, telemetry domains
-    # DO NOT block Extension Warehouse, 3D Warehouse, or Trimble Connect
+    # FULL BLOCK MODE: Block ALL SketchUp and Trimble domains
     $domainsToBlock = @(
-        # License & Activation (BLOCK - CRITICAL for license blocking)
+        # Main SketchUp Domains
+        "sketchup.com",
+        "www.sketchup.com",
+        "app.sketchup.com",
+        "my.sketchup.com",
+        
+        # License & Activation
         "license.sketchup.com",
         "licensing.sketchup.com",
         "activate.sketchup.com",
         "activation.sketchup.com",
-        "license.trimble.com",
-        "licensing.trimble.com",
-        "services.sketchup.com",
         "auth.sketchup.com",
+        "identity.sketchup.com",
+        "services.sketchup.com",
         
-        # Telemetry & Analytics (BLOCK)
+        # Extension Warehouse & 3D Warehouse (BLOCKED)
+        "extensions.sketchup.com",
+        "extensionwarehouse.sketchup.com",
+        "3dwarehouse.sketchup.com",
+        "warehouse.sketchup.com",
+        
+        # Telemetry & Analytics
         "telemetry.sketchup.com",
         "analytics.sketchup.com",
         "tracking.sketchup.com",
         "metrics.sketchup.com",
         "stats.sketchup.com",
+        "crashreport.sketchup.com",
+        "feedback.sketchup.com",
         
-        # Update Servers (BLOCK)
+        # Update Servers
         "update.sketchup.com",
         "updates.sketchup.com",
         "autoupdate.sketchup.com",
-        "download.sketchup.com"
+        "download.sketchup.com",
+        "downloads.sketchup.com",
+        
+        # API & Services
+        "api.sketchup.com",
+        "connect-api.sketchup.com",
+        "assets.sketchup.com",
+        "content.sketchup.com",
+        
+        # Trimble Domains
+        "trimble.com",
+        "www.trimble.com",
+        "license.trimble.com",
+        "licensing.trimble.com",
+        "identity.trimble.com",
+        "id.trimble.com",
+        "connect.trimble.com",
+        "cloud.trimble.com",
+        "api.trimble.com",
+        "telemetry.trimble.com",
+        "analytics.trimble.com",
+        
+        # Trimble Connect
+        "trimbleconnect.com",
+        "app.connect.trimble.com",
+        "sync.trimbleconnect.com",
+        
+        # CDN & Assets
+        "cdn.sketchup.com",
+        "static.sketchup.com",
+        "assets-prod.sketchup.com",
+        
+        # Legacy & Alternative Domains
+        "su-cdn.azureedge.net",
+        "sketchup.azureedge.net",
+        "sketchuphelp.com",
+        "help.sketchup.com",
+        "forums.sketchup.com",
+        "community.sketchup.com"
     )
     
-    Write-Host "  [INFO] Total domains in block list: $($domainsToBlock.Count)" -ForegroundColor Yellow
-    Write-Host "  [INFO] Extension Warehouse & 3D Warehouse are PRESERVED" -ForegroundColor Green
+    Write-Host "  [INFO] Total domains in FULL block list: $($domainsToBlock.Count)" -ForegroundColor Red
+    Write-Host "  [INFO] ALL SketchUp online features will be disabled" -ForegroundColor Red
     
     if ($script:Config.DryRun) {
         Write-Host "  [DRY RUN] Would backup hosts file to: $hostsBackup" -ForegroundColor DarkGray
@@ -906,10 +900,10 @@ function Block-SketchUpDomains {
         }
         
         if ($newEntries.Count -gt 0) {
-            $newEntries = @("", "# SketchUp 2025 Blocker Entries (Selective - License Focus) - Added $(Get-Date)") + $newEntries
+            $newEntries = @("", "# SketchUp 2025 Blocker - FULL BLOCK MODE - Added $(Get-Date)") + $newEntries
             Add-Content -Path $hostsPath -Value $newEntries
-            Write-Host "  [OK] Added $($newEntries.Count - 2) new domain entries" -ForegroundColor Green
-            Write-Log "Added $($newEntries.Count - 2) domain entries to hosts file" -Level SUCCESS
+            Write-Host "  [OK] Added $($newEntries.Count - 2) new domain entries" -ForegroundColor Red
+            Write-Log "Added $($newEntries.Count - 2) domain entries to hosts file (FULL BLOCK)" -Level SUCCESS
         }
         else {
             Write-Host "  [INFO] All domains already blocked" -ForegroundColor Cyan
@@ -978,17 +972,19 @@ Mode:                 $(if ($script:Config.DryRun) { "DRY RUN" } else { "LIVE" }
 Statistics:
 -----------
 Files Scanned:        $($script:Statistics.TotalFilesScanned)
-Files BLOCKED:        $(($script:Statistics.BlockedFilesList | Measure-Object).Count)
-Files ALLOWED:        $($script:Statistics.FilesAllowed)
+Files BLOCKED:        $($script:Statistics.FilesBlocked)
 Firewall Rules:       $($script:Statistics.FirewallRulesCreated)
 Domains Blocked:      $($script:Statistics.DomainsBlocked)
 Services Found:       $($script:Statistics.ServicesFound)
 
-SPECIAL MODE:
-Extension Warehouse:  PRESERVED ✓
-3D Warehouse:         PRESERVED ✓
-Trimble Connect:      PRESERVED ✓
-LICENSE ACTIVATION:   BLOCKED ✓
+FULL BLOCK MODE:
+ALL Files:            BLOCKED ✓
+ALL Domains:          BLOCKED ✓
+Extension Warehouse:  BLOCKED ✓
+3D Warehouse:         BLOCKED ✓
+Trimble Connect:      BLOCKED ✓
+License & Activation: BLOCKED ✓
+Network Access:       COMPLETELY DISABLED ✓
 
 File Locations:
 ---------------
@@ -1060,14 +1056,15 @@ try {
             
             Write-Host ""
             Write-Host "================================================================================" -ForegroundColor Green
-            Write-Host "                      SELECTIVE BLOCKING COMPLETE                               " -ForegroundColor Green
+            Write-Host "                      FULL BLOCKING COMPLETE                                    " -ForegroundColor Green
             Write-Host "================================================================================" -ForegroundColor Green
             Write-Host ""
-            Write-Host "  SketchUp 2025 license/telemetry blocked successfully!" -ForegroundColor Green
-            Write-Host "  Extension Warehouse & 3D Warehouse functionality PRESERVED!" -ForegroundColor Green
+            Write-Host "  SketchUp 2025 COMPLETELY BLOCKED from internet!" -ForegroundColor Red
+            Write-Host "  ALL network access disabled - ZERO connectivity!" -ForegroundColor Red
             Write-Host ""
-            Write-Host "  Blocked Files:  $(($script:Statistics.BlockedFilesList | Measure-Object).Count)" -ForegroundColor Red
-            Write-Host "  Allowed Files:  $($script:Statistics.FilesAllowed)" -ForegroundColor Green
+            Write-Host "  Files Blocked:    $($script:Statistics.FilesBlocked)" -ForegroundColor Red
+            Write-Host "  Domains Blocked:  $($script:Statistics.DomainsBlocked)" -ForegroundColor Red
+            Write-Host "  Firewall Rules:   $($script:Statistics.FirewallRulesCreated)" -ForegroundColor Red
             Write-Host ""
         }
         "2" {
